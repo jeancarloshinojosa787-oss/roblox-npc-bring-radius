@@ -1,6 +1,6 @@
 --[[
-    Rayfield UI para Blox Fruits - BringRadius System
-    Interface visual para control de NPCs en Blox Fruits
+    Rayfield UI para Blox Fruits - INSTANT BRING (Atracción Instantánea)
+    Trae todos los NPCs al jugador INSTANTÁNEAMENTE
     Coloca este script en StarterPlayer > StarterCharacterScripts o StarterGui
 ]]
 
@@ -13,59 +13,87 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 
--- Crear instancia de BringNPC (compatible con Blox Fruits)
-local BringNPC = {}
-BringNPC.__index = BringNPC
+-- ════════════════════════════════════════════════════════════════
+-- SISTEMA DE INSTANT BRING (ATRACCIÓN INSTANTÁNEA)
+-- ════════════════════════════════════════════════════════════════
 
-function BringNPC.new(config)
-    local self = setmetatable({}, BringNPC)
+local InstantBring = {}
+InstantBring.__index = InstantBring
+
+function InstantBring.new(config)
+    local self = setmetatable({}, InstantBring)
     self.config = config or {
-        BRING_RADIUS = 50,
-        ATTRACTION_SPEED = 0.5,
-        USE_DELTA_TIME = true,
-        MAX_SPEED = 100,
-        ENABLE_ROTATION = true
+        BRING_RADIUS = 100,
+        INSTANT_MODE = true,
+        TELEPORT_OFFSET = 5,
+        FREEZE_NPC = false
     }
-    self.activeNPCs = {}
     self.isRunning = false
-    self.lastUpdateTime = tick()
+    self.bringCount = 0
     return self
 end
 
-function BringNPC:GetDeltaTime()
-    local currentTime = tick()
-    local deltaTime = currentTime - self.lastUpdateTime
-    self.lastUpdateTime = currentTime
-    return deltaTime
-end
-
-function BringNPC:AttractNPC(npc, targetPos, deltaTime)
-    if not npc:FindFirstChild("HumanoidRootPart") then return end
+function InstantBring:BringAllNPCs()
+    if not character:FindFirstChild("HumanoidRootPart") then return 0 end
     
-    local npcPos = npc.HumanoidRootPart.Position
-    local direction = (targetPos - npcPos)
-    local distance = direction.Magnitude
+    local playerPos = character.HumanoidRootPart.Position
+    local bringCount = 0
     
-    if distance == 0 then return end
-    
-    local directionUnit = direction.Unit
-    local speed = self.config.ATTRACTION_SPEED * 10
-    if self.config.USE_DELTA_TIME then
-        speed = math.min(speed * deltaTime, self.config.MAX_SPEED * deltaTime)
+    -- Obtener todos los NPCs en el rango
+    for _, npc in pairs(workspace:GetDescendants()) do
+        if npc:IsA("Model") and npc:FindFirstChild("Humanoid") and npc:FindFirstChild("HumanoidRootPart") then
+            if npc.Parent ~= character and not Players:FindFirstChild(npc.Name) then
+                local npcPos = npc.HumanoidRootPart.Position
+                local distance = (playerPos - npcPos).Magnitude
+                
+                -- Si el NPC está en rango y vivo
+                if distance < self.config.BRING_RADIUS and npc.Humanoid.Health > 0 then
+                    -- TELEPORTACIÓN INSTANTÁNEA
+                    local offset = npcPos - playerPos
+                    local direction = offset.Unit
+                    
+                    -- Teletransportar el NPC cerca del jugador
+                    local newPos = playerPos + direction * self.config.TELEPORT_OFFSET
+                    npc.HumanoidRootPart.CFrame = CFrame.new(newPos)
+                    
+                    -- Opcional: Congelar el NPC
+                    if self.config.FREEZE_NPC then
+                        npc.HumanoidRootPart.CanCollide = false
+                        npc.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+                    end
+                    
+                    bringCount = bringCount + 1
+                end
+            end
+        end
     end
     
-    local newPos = npcPos + directionUnit * speed
-    
-    if npc:FindFirstChild("HumanoidRootPart") then
-        npc.HumanoidRootPart.CFrame = CFrame.new(newPos) * npc.HumanoidRootPart.CFrame.Rotation
-    end
+    self.bringCount = bringCount
+    return bringCount
 end
 
-function BringNPC:FindNPCsInRadius()
-    local npcs = {}
-    local playerPos = character:FindFirstChild("HumanoidRootPart").Position
+function InstantBring:ContinuousBring()
+    self.isRunning = true
     
-    -- Buscar enemigos en el workspace
+    self._connection = RunService.RenderStepped:Connect(function()
+        if not self.isRunning or not character:FindFirstChild("HumanoidRootPart") then return end
+        self:BringAllNPCs()
+    end)
+end
+
+function InstantBring:Stop()
+    if self._connection then
+        self._connection:Disconnect()
+    end
+    self.isRunning = false
+end
+
+function InstantBring:GetNPCCount()
+    if not character:FindFirstChild("HumanoidRootPart") then return 0 end
+    
+    local playerPos = character.HumanoidRootPart.Position
+    local count = 0
+    
     for _, npc in pairs(workspace:GetDescendants()) do
         if npc:IsA("Model") and npc:FindFirstChild("Humanoid") and npc:FindFirstChild("HumanoidRootPart") then
             if npc.Parent ~= character and not Players:FindFirstChild(npc.Name) then
@@ -73,52 +101,16 @@ function BringNPC:FindNPCsInRadius()
                 local distance = (playerPos - npcPos).Magnitude
                 
                 if distance < self.config.BRING_RADIUS and npc.Humanoid.Health > 0 then
-                    table.insert(npcs, npc)
+                    count = count + 1
                 end
             end
         end
     end
     
-    return npcs
+    return count
 end
 
-function BringNPC:Start()
-    if self.isRunning then return end
-    self.isRunning = true
-    
-    self._connection = RunService.RenderStepped:Connect(function()
-        if not self.isRunning or not character:FindFirstChild("HumanoidRootPart") then return end
-        
-        local deltaTime = self:GetDeltaTime()
-        local playerPos = character.HumanoidRootPart.Position
-        local npcs = self:FindNPCsInRadius()
-        
-        for _, npc in pairs(npcs) do
-            if npc:FindFirstChild("Humanoid") and npc.Humanoid.Health > 0 then
-                self:AttractNPC(npc, playerPos, deltaTime)
-            end
-        end
-    end)
-end
-
-function BringNPC:Stop()
-    if self._connection then
-        self._connection:Disconnect()
-    end
-    self.isRunning = false
-end
-
-function BringNPC:GetStats()
-    local npcs = self:FindNPCsInRadius()
-    return {
-        totalNPCs = #npcs,
-        bringRadius = self.config.BRING_RADIUS,
-        attractionSpeed = self.config.ATTRACTION_SPEED,
-        usingDeltaTime = self.config.USE_DELTA_TIME
-    }
-end
-
-function BringNPC:SetConfig(key, value)
+function InstantBring:SetConfig(key, value)
     if self.config[key] ~= nil then
         self.config[key] = value
         return true
@@ -126,23 +118,25 @@ function BringNPC:SetConfig(key, value)
     return false
 end
 
--- Crear instancia del sistema
-local bringNPC = BringNPC.new({
-    BRING_RADIUS = 50,
-    ATTRACTION_SPEED = 0.5,
-    USE_DELTA_TIME = true,
-    MAX_SPEED = 100,
-    ENABLE_ROTATION = true
+-- Crear instancia del sistema INSTANT BRING
+local instantBring = InstantBring.new({
+    BRING_RADIUS = 100,
+    INSTANT_MODE = true,
+    TELEPORT_OFFSET = 5,
+    FREEZE_NPC = false
 })
 
--- Crear la ventana principal de Rayfield
+-- ════════════════════════════════════════════════════════════════
+-- INTERFAZ RAYFIELD
+-- ════════════════════════════════════════════════════════════════
+
 local Window = Rayfield:CreateWindow({
-    Name = "🎮 Blox Fruits - NPC Bring",
-    LoadingTitle = "Cargando Sistema...",
-    LoadingSubtitle = "Iniciando BringRadius para Blox Fruits",
+    Name = "⚡ Blox Fruits - INSTANT BRING",
+    LoadingTitle = "Cargando...",
+    LoadingSubtitle = "Sistema de Atracción Instantánea",
     ConfigurationSaving = {
         Enabled = true,
-        FolderName = "BloxFruitsBring",
+        FolderName = "BloxFruitsInstantBring",
         FileName = "config.json"
     },
     Discord = {
@@ -157,21 +151,34 @@ local Window = Rayfield:CreateWindow({
 -- PESTAÑA PRINCIPAL
 -- ════════════════════════════════════════════════════════════════
 
-local MainTab = Window:CreateTab("🏠 Principal", 0)
+local MainTab = Window:CreateTab("⚡ INSTANT BRING", 0)
 
-local ControlSection = MainTab:CreateSection("⚙️ Control del Sistema")
+local MainSection = MainTab:CreateSection("🎯 ATRACCIÓN INSTANTÁNEA")
 
-local isRunning = false
+local isBringingActive = false
 
 MainTab:CreateButton({
-    Name = "▶️ Iniciar Bring",
+    Name = "⚡ TRAER TODOS LOS NPCs (UNA VEZ)",
     Callback = function()
-        if not isRunning then
-            bringNPC:Start()
-            isRunning = true
+        local count = instantBring:BringAllNPCs()
+        Rayfield:Notify({
+            Title = "⚡ NPCs Traídos",
+            Content = "Se trajeron " .. count .. " NPCs instantáneamente",
+            Duration = 2,
+            Image = 4483362458
+        })
+    end
+})
+
+MainTab:CreateButton({
+    Name = "▶️ MODO CONTINUO (Traer constantemente)",
+    Callback = function()
+        if not isBringingActive then
+            instantBring:ContinuousBring()
+            isBringingActive = true
             Rayfield:Notify({
-                Title = "✅ Bring Activado",
-                Content = "Comenzando a atraer NPCs hacia ti",
+                Title = "▶️ Modo Continuo Activado",
+                Content = "Atrayendo NPCs constantemente...",
                 Duration = 2,
                 Image = 4483362458
             })
@@ -180,14 +187,14 @@ MainTab:CreateButton({
 })
 
 MainTab:CreateButton({
-    Name = "⏹️ Detener Bring",
+    Name = "⏹️ DETENER MODO CONTINUO",
     Callback = function()
-        if isRunning then
-            bringNPC:Stop()
-            isRunning = false
+        if isBringingActive then
+            instantBring:Stop()
+            isBringingActive = false
             Rayfield:Notify({
-                Title = "⏹️ Bring Detenido",
-                Content = "NPCs dejarán de ser atraídos",
+                Title = "⏹️ Modo Continuo Detenido",
+                Content = "Sistema desactivado",
                 Duration = 2,
                 Image = 4483362458
             })
@@ -196,62 +203,38 @@ MainTab:CreateButton({
 })
 
 -- Sección de Configuración
-local ConfigSection = MainTab:CreateSection("🎛️ Configuración")
+local ConfigSection = MainTab:CreateSection("⚙️ CONFIGURACIÓN")
 
 local radiusSlider = MainTab:CreateSlider({
-    Name = "📏 Radio de Atracción",
-    Range = {10, 300},
-    Increment = 5,
-    Suffix = " studs",
-    CurrentValue = 50,
-    Flag = "RadiusSlider",
-    Callback = function(Value)
-        bringNPC:SetConfig("BRING_RADIUS", Value)
-    end
-})
-
-local speedSlider = MainTab:CreateSlider({
-    Name = "⚡ Velocidad de Atracción",
-    Range = {0.1, 3},
-    Increment = 0.1,
-    Suffix = "x",
-    CurrentValue = 0.5,
-    Flag = "SpeedSlider",
-    Callback = function(Value)
-        bringNPC:SetConfig("ATTRACTION_SPEED", Value)
-    end
-})
-
-local maxSpeedSlider = MainTab:CreateSlider({
-    Name = "🚀 Velocidad Máxima",
+    Name = "📏 Radio de Detección",
     Range = {10, 500},
     Increment = 10,
-    Suffix = " studs/s",
+    Suffix = " studs",
     CurrentValue = 100,
-    Flag = "MaxSpeedSlider",
+    Flag = "RadiusSlider",
     Callback = function(Value)
-        bringNPC:SetConfig("MAX_SPEED", Value)
+        instantBring:SetConfig("BRING_RADIUS", Value)
     end
 })
 
--- Sección de Características
-local FeaturesSection = MainTab:CreateSection("🌟 Características")
-
-MainTab:CreateToggle({
-    Name = "⏱️ Delta Time (Recomendado)",
-    CurrentValue = true,
-    Flag = "DeltaTimeToggle",
+local offsetSlider = MainTab:CreateSlider({
+    Name = "📍 Distancia al Jugador",
+    Range = {1, 50},
+    Increment = 1,
+    Suffix = " studs",
+    CurrentValue = 5,
+    Flag = "OffsetSlider",
     Callback = function(Value)
-        bringNPC:SetConfig("USE_DELTA_TIME", Value)
+        instantBring:SetConfig("TELEPORT_OFFSET", Value)
     end
 })
 
 MainTab:CreateToggle({
-    Name = "🔄 Rotación Automática",
-    CurrentValue = true,
-    Flag = "RotationToggle",
+    Name = "❄️ Congelar NPCs al Traer",
+    CurrentValue = false,
+    Flag = "FreezeToggle",
     Callback = function(Value)
-        bringNPC:SetConfig("ENABLE_ROTATION", Value)
+        instantBring:SetConfig("FREEZE_NPC", Value)
     end
 })
 
@@ -259,41 +242,107 @@ MainTab:CreateToggle({
 -- PESTAÑA DE ESTADÍSTICAS
 -- ════════════════════════════════════════════════════════════════
 
-local StatsTab = Window:CreateTab("📊 Estadísticas", 0)
+local StatsTab = Window:CreateTab("📊 ESTADÍSTICAS", 0)
 
-local StatsSection = StatsTab:CreateSection("📈 Información en Vivo")
-
--- Label de estadísticas que se actualiza cada segundo
 local statsLabel = StatsTab:CreateLabel("Cargando...")
 
 task.spawn(function()
     while true do
-        task.wait(1)
-        local stats = bringNPC:GetStats()
+        task.wait(0.5)
+        local npcCount = instantBring:GetNPCCount()
         
         statsLabel:Set(
-            "═══════════════════════════════\n" ..
-            "📈 ESTADÍSTICAS EN VIVO\n" ..
-            "═══════════════════════════════\n\n" ..
-            "👾 NPCs en Rango: " .. stats.totalNPCs .. "\n" ..
-            "📏 Radio: " .. stats.bringRadius .. " studs\n" ..
-            "⚡ Velocidad: " .. string.format("%.2f", stats.attractionSpeed) .. "x\n" ..
-            "⏱️ Delta Time: " .. tostring(stats.usingDeltaTime) .. "\n" ..
-            "🟢 Estado: " .. (isRunning and "ACTIVO" or "INACTIVO") .. "\n" ..
-            "═══════════════════════════════"
+            "═══════════════════════════════════════\n" ..
+            "📊 INFORMACIÓN EN TIEMPO REAL\n" ..
+            "═══════════════════════════════════════\n\n" ..
+            "👾 NPCs Disponibles: " .. npcCount .. "\n" ..
+            "📏 Radio de Detección: " .. instantBring.config.BRING_RADIUS .. " studs\n" ..
+            "📍 Distancia: " .. instantBring.config.TELEPORT_OFFSET .. " studs\n" ..
+            "❄️ Congelar: " .. tostring(instantBring.config.FREEZE_NPC) .. "\n" ..
+            "🟢 Estado: " .. (isBringingActive and "🔴 ACTIVO" or "⚪ INACTIVO") .. "\n" ..
+            "═══════════════════════════════════════"
         )
     end
 end)
 
-StatsTab:CreateButton({
-    Name = "🔄 Actualizar Estadísticas",
-    Callback = function()
-        local stats = bringNPC:GetStats()
+-- ════════════════════════════════════════════════════════════════
+-- PESTAÑA DE ATAJOS
+-- ════════════════════════════════════════════════════════════════
+
+local KeyBindTab = Window:CreateTab("⌨️ ATAJOS", 0)
+
+KeyBindTab:CreateKeybind({
+    Name = "⚡ Traer Todos (Insta)",
+    CurrentKeybind = "R",
+    HoldToInteract = false,
+    Flag = "InstantBringKey",
+    Callback = function(Keybind)
+        local count = instantBring:BringAllNPCs()
         Rayfield:Notify({
-            Title = "📊 Estadísticas",
-            Content = "NPCs: " .. stats.totalNPCs .. " | Radio: " .. stats.bringRadius .. " studs",
-            Duration = 3,
-            Image = 4483362458
+            Title = "⚡ TRAÍDO",
+            Content = count .. " NPCs traídos",
+            Duration = 1
+        })
+    end
+})
+
+KeyBindTab:CreateKeybind({
+    Name = "▶️/⏹️ Modo Continuo",
+    CurrentKeybind = "T",
+    HoldToInteract = false,
+    Flag = "ContinuousKey",
+    Callback = function(Keybind)
+        isBringingActive = not isBringingActive
+        if isBringingActive then
+            instantBring:ContinuousBring()
+            Rayfield:Notify({
+                Title = "▶️ Activado",
+                Content = "Modo continuo encendido",
+                Duration = 1
+            })
+        else
+            instantBring:Stop()
+            Rayfield:Notify({
+                Title = "⏹️ Desactivado",
+                Content = "Modo continuo apagado",
+                Duration = 1
+            })
+        end
+    end
+})
+
+KeyBindTab:CreateKeybind({
+    Name = "➕ Aumentar Radio",
+    CurrentKeybind = "Up",
+    HoldToInteract = false,
+    Flag = "IncreaseRadiusKey",
+    Callback = function(Keybind)
+        local currentRadius = instantBring.config.BRING_RADIUS
+        local newRadius = math.min(currentRadius + 20, 500)
+        instantBring:SetConfig("BRING_RADIUS", newRadius)
+        radiusSlider:Set(newRadius)
+        Rayfield:Notify({
+            Title = "📏 Radio",
+            Content = newRadius .. " studs",
+            Duration = 1
+        })
+    end
+})
+
+KeyBindTab:CreateKeybind({
+    Name = "➖ Disminuir Radio",
+    CurrentKeybind = "Down",
+    HoldToInteract = false,
+    Flag = "DecreaseRadiusKey",
+    Callback = function(Keybind)
+        local currentRadius = instantBring.config.BRING_RADIUS
+        local newRadius = math.max(currentRadius - 20, 10)
+        instantBring:SetConfig("BRING_RADIUS", newRadius)
+        radiusSlider:Set(newRadius)
+        Rayfield:Notify({
+            Title = "📏 Radio",
+            Content = newRadius .. " studs",
+            Duration = 1
         })
     end
 })
@@ -302,155 +351,64 @@ StatsTab:CreateButton({
 -- PESTAÑA DE PRESETS
 -- ════════════════════════════════════════════════════════════════
 
-local PresetsTab = Window:CreateTab("⚡ Presets", 0)
-
-local PresetsSection = PresetsTab:CreateSection("🎮 Modos Predefinidos")
+local PresetsTab = Window:CreateTab("⚡ PRESETS", 0)
 
 PresetsTab:CreateButton({
-    Name = "🐢 Modo Defensivo",
+    Name = "🔪 Modo Duelo (Radio Pequeño)",
     Callback = function()
-        bringNPC:SetConfig("BRING_RADIUS", 30)
-        bringNPC:SetConfig("ATTRACTION_SPEED", 0.3)
-        radiusSlider:Set(30)
-        speedSlider:Set(0.3)
+        instantBring:SetConfig("BRING_RADIUS", 50)
+        instantBring:SetConfig("TELEPORT_OFFSET", 3)
+        radiusSlider:Set(50)
+        offsetSlider:Set(3)
         Rayfield:Notify({
-            Title = "🐢 Modo Defensivo",
-            Content = "Radio reducido para máxima precisión",
-            Duration = 2,
-            Image = 4483362458
+            Title = "🔪 Modo Duelo",
+            Content = "Radio: 50 | Distancia: 3",
+            Duration = 2
         })
     end
 })
 
 PresetsTab:CreateButton({
-    Name = "⚔️ Modo Combate",
+    Name = "⚔️ Modo Combate Normal",
     Callback = function()
-        bringNPC:SetConfig("BRING_RADIUS", 60)
-        bringNPC:SetConfig("ATTRACTION_SPEED", 0.6)
-        radiusSlider:Set(60)
-        speedSlider:Set(0.6)
+        instantBring:SetConfig("BRING_RADIUS", 100)
+        instantBring:SetConfig("TELEPORT_OFFSET", 5)
+        radiusSlider:Set(100)
+        offsetSlider:Set(5)
         Rayfield:Notify({
             Title = "⚔️ Modo Combate",
-            Content = "Configuración equilibrada para combate",
-            Duration = 2,
-            Image = 4483362458
+            Content = "Radio: 100 | Distancia: 5",
+            Duration = 2
         })
     end
 })
 
 PresetsTab:CreateButton({
-    Name = "⚡ Modo Ofensivo",
+    Name = "🌊 Modo Granja Total",
     Callback = function()
-        bringNPC:SetConfig("BRING_RADIUS", 100)
-        bringNPC:SetConfig("ATTRACTION_SPEED", 1.0)
-        radiusSlider:Set(100)
-        speedSlider:Set(1.0)
-        Rayfield:Notify({
-            Title = "⚡ Modo Ofensivo",
-            Content = "Radio amplio para máxima agresión",
-            Duration = 2,
-            Image = 4483362458
-        })
-    end
-})
-
-PresetsTab:CreateButton({
-    Name = "🔥 Modo Extremo",
-    Callback = function()
-        bringNPC:SetConfig("BRING_RADIUS", 200)
-        bringNPC:SetConfig("ATTRACTION_SPEED", 1.5)
-        radiusSlider:Set(200)
-        speedSlider:Set(1.5)
-        Rayfield:Notify({
-            Title = "🔥 Modo Extremo",
-            Content = "¡Trae TODOS los enemigos!",
-            Duration = 2,
-            Image = 4483362458
-        })
-    end
-})
-
-PresetsTab:CreateButton({
-    Name = "🌊 Granja de Enemigos",
-    Callback = function()
-        bringNPC:SetConfig("BRING_RADIUS", 150)
-        bringNPC:SetConfig("ATTRACTION_SPEED", 0.8)
-        radiusSlider:Set(150)
-        speedSlider:Set(0.8)
+        instantBring:SetConfig("BRING_RADIUS", 250)
+        instantBring:SetConfig("TELEPORT_OFFSET", 8)
+        radiusSlider:Set(250)
+        offsetSlider:Set(8)
         Rayfield:Notify({
             Title = "🌊 Modo Granja",
-            Content = "Óptimo para farmear enemigos",
-            Duration = 2,
-            Image = 4483362458
+            Content = "Radio: 250 | Distancia: 8",
+            Duration = 2
         })
     end
 })
 
--- ════════════════════════════════════════════════════════════════
--- PESTAÑA DE ATAJOS
--- ════════════════════════════════════════════════════════════════
-
-local KeyBindTab = Window:CreateTab("⌨️ Atajos", 0)
-
-local KeyBindSection = KeyBindTab:CreateSection("⌨️ Teclas de Atajo")
-
-KeyBindTab:CreateKeybind({
-    Name = "Activar/Desactivar Bring",
-    CurrentKeybind = "F",
-    HoldToInteract = false,
-    Flag = "ToggleBringKey",
-    Callback = function(Keybind)
-        isRunning = not isRunning
-        if isRunning then
-            bringNPC:Start()
-            Rayfield:Notify({
-                Title = "✅ Activado",
-                Content = "Sistema activado con F",
-                Duration = 1
-            })
-        else
-            bringNPC:Stop()
-            Rayfield:Notify({
-                Title = "⏹️ Desactivado",
-                Content = "Sistema desactivado con F",
-                Duration = 1
-            })
-        end
-    end
-})
-
-KeyBindTab:CreateKeybind({
-    Name = "Aumentar Radio",
-    CurrentKeybind = "E",
-    HoldToInteract = false,
-    Flag = "IncreaseRadiusKey",
-    Callback = function(Keybind)
-        local currentRadius = bringNPC.config.BRING_RADIUS
-        local newRadius = math.min(currentRadius + 10, 300)
-        bringNPC:SetConfig("BRING_RADIUS", newRadius)
-        radiusSlider:Set(newRadius)
+PresetsTab:CreateButton({
+    Name = "🔥 MODO EXTREMO (MÁXIMO RANGO)",
+    Callback = function()
+        instantBring:SetConfig("BRING_RADIUS", 500)
+        instantBring:SetConfig("TELEPORT_OFFSET", 10)
+        radiusSlider:Set(500)
+        offsetSlider:Set(10)
         Rayfield:Notify({
-            Title = "📏 Radio",
-            Content = "Nuevo radio: " .. newRadius .. " studs",
-            Duration = 1
-        })
-    end
-})
-
-KeyBindTab:CreateKeybind({
-    Name = "Disminuir Radio",
-    CurrentKeybind = "Q",
-    HoldToInteract = false,
-    Flag = "DecreaseRadiusKey",
-    Callback = function(Keybind)
-        local currentRadius = bringNPC.config.BRING_RADIUS
-        local newRadius = math.max(currentRadius - 10, 10)
-        bringNPC:SetConfig("BRING_RADIUS", newRadius)
-        radiusSlider:Set(newRadius)
-        Rayfield:Notify({
-            Title = "📏 Radio",
-            Content = "Nuevo radio: " .. newRadius .. " studs",
-            Duration = 1
+            Title = "🔥 MODO EXTREMO",
+            Content = "¡TRAE TODOS LOS ENEMIGOS!",
+            Duration = 2
         })
     end
 })
@@ -459,21 +417,23 @@ KeyBindTab:CreateKeybind({
 -- PESTAÑA DE INFORMACIÓN
 -- ════════════════════════════════════════════════════════════════
 
-local InfoTab = Window:CreateTab("ℹ️ Información", 0)
+local InfoTab = Window:CreateTab("ℹ️ INFO", 0)
 
 InfoTab:CreateLabel(
-    "🎮 BLOX FRUITS NPC BRING SYSTEM\n\n" ..
-    "Sistema avanzado de atracción de NPCs para Blox Fruits\n\n" ..
-    "CARACTERÍSTICAS:\n" ..
-    "✓ Delta Time para movimiento suave\n" ..
-    "✓ Radio de atracción configurable\n" ..
-    "✓ Múltiples presets\n" ..
-    "✓ Estadísticas en vivo\n" ..
-    "✓ Atajos de teclado\n\n" ..
-    "USO:\n" ..
-    "1. Presiona F para activar/desactivar\n" ..
-    "2. Ajusta el radio con Q/E\n" ..
-    "3. Elige un preset para rápida configuración\n\n" ..
+    "⚡ INSTANT BRING SYSTEM\n\n" ..
+    "Sistema de atracción INSTANTÁNEA para Blox Fruits\n\n" ..
+    "🎯 CARACTERÍSTICAS:\n" ..
+    "✓ Trae NPCs INSTANTÁNEAMENTE\n" ..
+    "✓ Modo continuo para granja\n" ..
+    "✓ Radio configurable (10-500 studs)\n" ..
+    "✓ Distancia al jugador personalizable\n" ..
+    "✓ Opción de congelación\n" ..
+    "✓ Atajos de teclado rápidos\n\n" ..
+    "⌨️ CONTROLES:\n" ..
+    "R - Traer todos (Instantáneo)\n" ..
+    "T - Activar/Desactivar continuo\n" ..
+    "↑ - Aumentar radio\n" ..
+    "↓ - Disminuir radio\n\n" ..
     "⚠️ USO BAJO TU RESPONSABILIDAD"
 )
 
@@ -481,9 +441,9 @@ InfoTab:CreateButton({
     Name = "📋 Ver Configuración",
     Callback = function()
         print("═══════════════════════════════════")
-        print("CONFIGURACIÓN ACTUAL")
+        print("CONFIGURACIÓN ACTUAL - INSTANT BRING")
         print("═══════════════════════════════════")
-        for key, value in pairs(bringNPC.config) do
+        for key, value in pairs(instantBring.config) do
             print(key .. ": " .. tostring(value))
         end
         print("═══════════════════════════════════")
@@ -492,8 +452,8 @@ InfoTab:CreateButton({
 
 -- Notificación inicial
 Rayfield:Notify({
-    Title = "✨ ¡Bienvenido!",
-    Content = "Sistema de Bring Radius para Blox Fruits cargado.\nPresiona F para activar",
+    Title = "⚡ INSTANT BRING ACTIVADO",
+    Content = "Presiona R para traer todos los NPCs instantáneamente",
     Duration = 4,
     Image = 4483362458
 })
@@ -501,12 +461,12 @@ Rayfield:Notify({
 -- Actualizar cuando el jugador muere
 player.CharacterAdded:Connect(function(newCharacter)
     character = newCharacter
-    if isRunning then
-        bringNPC:Stop()
-        isRunning = false
+    if isBringingActive then
+        instantBring:Stop()
+        isBringingActive = false
         task.wait(0.5)
-        bringNPC:Start()
-        isRunning = true
+        instantBring:ContinuousBring()
+        isBringingActive = true
     end
 end)
 
