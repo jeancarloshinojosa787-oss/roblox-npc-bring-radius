@@ -1,6 +1,6 @@
 --[[
-    Rayfield UI para Blox Fruits - INSTANT BRING (Atracción Instantánea)
-    Trae todos los NPCs al jugador INSTANTÁNEAMENTE
+    Rayfield UI para Blox Fruits - INSTANT BRING (Optimizado Anti-Lag)
+    Trae todos los NPCs al jugador INSTANTÁNEAMENTE con optimizaciones anti-lag
     Coloca este script en StarterPlayer > StarterCharacterScripts o StarterGui
 ]]
 
@@ -12,6 +12,78 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
+
+-- ════════════════════════════════════════════════════════════════
+-- SISTEMA DE ANTI-LAG OPTIMIZER
+-- ════════════════════════════════════════════════════════════════
+
+local AntiLagOptimizer = {}
+AntiLagOptimizer.__index = AntiLagOptimizer
+
+function AntiLagOptimizer.new()
+    local self = setmetatable({}, AntiLagOptimizer)
+    self.isEnabled = false
+    self.originalSettings = {}
+    return self
+end
+
+function AntiLagOptimizer:Enable()
+    if self.isEnabled then return end
+    self.isEnabled = true
+    
+    local lighting = game:GetService("Lighting")
+    local workspace = workspace
+    
+    -- Guardar configuración original
+    self.originalSettings.ambientColor = lighting.Ambient
+    self.originalSettings.ambientBrightness = lighting.Brightness
+    self.originalSettings.clipDistance = workspace.CurrentCamera.FieldOfView
+    self.originalSettings.shadowMap = lighting.GlobalShadows
+    
+    -- Aplicar optimizaciones
+    lighting.Ambient = Color3.fromRGB(127, 127, 127)
+    lighting.Brightness = 2
+    lighting.GlobalShadows = false
+    
+    -- Reducir calidad de gráficos
+    workspace.CurrentCamera.FieldOfView = 70
+    
+    -- Desactivar efectos visuales innecesarios
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") then
+            obj.Enabled = false
+        elseif obj:IsA("Trail") then
+            obj.Enabled = false
+        end
+    end
+    
+    return true
+end
+
+function AntiLagOptimizer:Disable()
+    if not self.isEnabled then return end
+    self.isEnabled = false
+    
+    local lighting = game:GetService("Lighting")
+    
+    -- Restaurar configuración original
+    lighting.Ambient = self.originalSettings.ambientColor
+    lighting.Brightness = self.originalSettings.ambientBrightness
+    lighting.GlobalShadows = self.originalSettings.shadowMap
+    
+    -- Reactivar efectos visuales
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") then
+            obj.Enabled = true
+        elseif obj:IsA("Trail") then
+            obj.Enabled = true
+        end
+    end
+    
+    return true
+end
+
+local antiLagOptimizer = AntiLagOptimizer.new()
 
 -- ════════════════════════════════════════════════════════════════
 -- SISTEMA DE INSTANT BRING (ATRACCIÓN INSTANTÁNEA)
@@ -26,44 +98,80 @@ function InstantBring.new(config)
         BRING_RADIUS = 100,
         INSTANT_MODE = true,
         TELEPORT_OFFSET = 5,
-        FREEZE_NPC = false
+        FREEZE_NPC = false,
+        BATCH_SIZE = 10,  -- Traer NPCs en lotes
+        BATCH_DELAY = 0.01  -- Delay entre lotes
     }
     self.isRunning = false
     self.bringCount = 0
+    self.npcCache = {}
+    self.lastCacheTime = 0
     return self
 end
 
-function InstantBring:BringAllNPCs()
-    if not character:FindFirstChild("HumanoidRootPart") then return 0 end
+function InstantBring:UpdateNPCCache()
+    local currentTime = tick()
+    -- Actualizar cache cada 0.1 segundos
+    if currentTime - self.lastCacheTime < 0.1 then
+        return self.npcCache
+    end
+    
+    self.lastCacheTime = currentTime
+    self.npcCache = {}
+    
+    if not character:FindFirstChild("HumanoidRootPart") then return {} end
     
     local playerPos = character.HumanoidRootPart.Position
-    local bringCount = 0
     
-    -- Obtener todos los NPCs en el rango
+    -- Obtener todos los NPCs en el rango de una vez
     for _, npc in pairs(workspace:GetDescendants()) do
         if npc:IsA("Model") and npc:FindFirstChild("Humanoid") and npc:FindFirstChild("HumanoidRootPart") then
             if npc.Parent ~= character and not Players:FindFirstChild(npc.Name) then
                 local npcPos = npc.HumanoidRootPart.Position
                 local distance = (playerPos - npcPos).Magnitude
                 
-                -- Si el NPC está en rango y vivo
                 if distance < self.config.BRING_RADIUS and npc.Humanoid.Health > 0 then
-                    -- TELEPORTACIÓN INSTANTÁNEA
-                    local offset = npcPos - playerPos
-                    local direction = offset.Unit
-                    
-                    -- Teletransportar el NPC cerca del jugador
-                    local newPos = playerPos + direction * self.config.TELEPORT_OFFSET
-                    npc.HumanoidRootPart.CFrame = CFrame.new(newPos)
-                    
-                    -- Opcional: Congelar el NPC
-                    if self.config.FREEZE_NPC then
-                        npc.HumanoidRootPart.CanCollide = false
-                        npc.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-                    end
-                    
-                    bringCount = bringCount + 1
+                    table.insert(self.npcCache, npc)
                 end
+            end
+        end
+    end
+    
+    return self.npcCache
+end
+
+function InstantBring:BringAllNPCsOptimized()
+    if not character:FindFirstChild("HumanoidRootPart") then return 0 end
+    
+    local playerPos = character.HumanoidRootPart.Position
+    local bringCount = 0
+    
+    -- Usar cache en lugar de buscar todos los descendientes cada vez
+    local npcsInRange = self:UpdateNPCCache()
+    
+    -- Procesar NPCs en lotes para evitar lag
+    for i, npc in pairs(npcsInRange) do
+        if i % self.config.BATCH_SIZE == 0 then
+            task.wait(self.config.BATCH_DELAY)
+        end
+        
+        if npc:FindFirstChild("HumanoidRootPart") and npc:FindFirstChild("Humanoid") then
+            if npc.Humanoid.Health > 0 then
+                -- TELEPORTACIÓN INSTANTÁNEA
+                local offset = npc.HumanoidRootPart.Position - playerPos
+                local direction = offset.Unit
+                
+                -- Teletransportar el NPC cerca del jugador
+                local newPos = playerPos + direction * self.config.TELEPORT_OFFSET
+                npc.HumanoidRootPart.CFrame = CFrame.new(newPos)
+                
+                -- Opcional: Congelar el NPC
+                if self.config.FREEZE_NPC then
+                    npc.HumanoidRootPart.CanCollide = false
+                    npc.HumanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+                end
+                
+                bringCount = bringCount + 1
             end
         end
     end
@@ -77,7 +185,7 @@ function InstantBring:ContinuousBring()
     
     self._connection = RunService.RenderStepped:Connect(function()
         if not self.isRunning or not character:FindFirstChild("HumanoidRootPart") then return end
-        self:BringAllNPCs()
+        self:BringAllNPCsOptimized()
     end)
 end
 
@@ -89,25 +197,7 @@ function InstantBring:Stop()
 end
 
 function InstantBring:GetNPCCount()
-    if not character:FindFirstChild("HumanoidRootPart") then return 0 end
-    
-    local playerPos = character.HumanoidRootPart.Position
-    local count = 0
-    
-    for _, npc in pairs(workspace:GetDescendants()) do
-        if npc:IsA("Model") and npc:FindFirstChild("Humanoid") and npc:FindFirstChild("HumanoidRootPart") then
-            if npc.Parent ~= character and not Players:FindFirstChild(npc.Name) then
-                local npcPos = npc.HumanoidRootPart.Position
-                local distance = (playerPos - npcPos).Magnitude
-                
-                if distance < self.config.BRING_RADIUS and npc.Humanoid.Health > 0 then
-                    count = count + 1
-                end
-            end
-        end
-    end
-    
-    return count
+    return #self:UpdateNPCCache()
 end
 
 function InstantBring:SetConfig(key, value)
@@ -123,7 +213,9 @@ local instantBring = InstantBring.new({
     BRING_RADIUS = 100,
     INSTANT_MODE = true,
     TELEPORT_OFFSET = 5,
-    FREEZE_NPC = false
+    FREEZE_NPC = false,
+    BATCH_SIZE = 10,
+    BATCH_DELAY = 0.01
 })
 
 -- ════════════════════════════════════════════════════════════════
@@ -131,9 +223,9 @@ local instantBring = InstantBring.new({
 -- ════════════════════════════════════════════════════════════════
 
 local Window = Rayfield:CreateWindow({
-    Name = "⚡ Blox Fruits - INSTANT BRING",
+    Name = "⚡ Blox Fruits - INSTANT BRING (Anti-Lag)",
     LoadingTitle = "Cargando...",
-    LoadingSubtitle = "Sistema de Atracción Instantánea",
+    LoadingSubtitle = "Sistema de Atracción Instantánea Optimizado",
     ConfigurationSaving = {
         Enabled = true,
         FolderName = "BloxFruitsInstantBring",
@@ -160,7 +252,7 @@ local isBringingActive = false
 MainTab:CreateButton({
     Name = "⚡ TRAER TODOS LOS NPCs (UNA VEZ)",
     Callback = function()
-        local count = instantBring:BringAllNPCs()
+        local count = instantBring:BringAllNPCsOptimized()
         Rayfield:Notify({
             Title = "⚡ NPCs Traídos",
             Content = "Se trajeron " .. count .. " NPCs instantáneamente",
@@ -202,6 +294,35 @@ MainTab:CreateButton({
     end
 })
 
+-- Sección de Anti-Lag
+local AntiLagSection = MainTab:CreateSection("🛡️ ANTI-LAG")
+
+MainTab:CreateButton({
+    Name = "🛡️ ACTIVAR ANTI-LAG",
+    Callback = function()
+        antiLagOptimizer:Enable()
+        Rayfield:Notify({
+            Title = "🛡️ Anti-Lag Activado",
+            Content = "Optimizaciones de rendimiento aplicadas",
+            Duration = 2,
+            Image = 4483362458
+        })
+    end
+})
+
+MainTab:CreateButton({
+    Name = "✨ DESACTIVAR ANTI-LAG",
+    Callback = function()
+        antiLagOptimizer:Disable()
+        Rayfield:Notify({
+            Title = "✨ Anti-Lag Desactivado",
+            Content = "Gráficos normales restaurados",
+            Duration = 2,
+            Image = 4483362458
+        })
+    end
+})
+
 -- Sección de Configuración
 local ConfigSection = MainTab:CreateSection("⚙️ CONFIGURACIÓN")
 
@@ -226,6 +347,30 @@ local offsetSlider = MainTab:CreateSlider({
     Flag = "OffsetSlider",
     Callback = function(Value)
         instantBring:SetConfig("TELEPORT_OFFSET", Value)
+    end
+})
+
+local batchSlider = MainTab:CreateSlider({
+    Name = "📦 Tamaño de Lote (Anti-Lag)",
+    Range = {5, 50},
+    Increment = 5,
+    Suffix = " NPCs",
+    CurrentValue = 10,
+    Flag = "BatchSlider",
+    Callback = function(Value)
+        instantBring:SetConfig("BATCH_SIZE", Value)
+    end
+})
+
+local batchDelaySlider = MainTab:CreateSlider({
+    Name = "⏱️ Delay entre Lotes",
+    Range = {0, 0.1},
+    Increment = 0.01,
+    Suffix = "s",
+    CurrentValue = 0.01,
+    Flag = "BatchDelaySlider",
+    Callback = function(Value)
+        instantBring:SetConfig("BATCH_DELAY", Value)
     end
 })
 
@@ -258,7 +403,10 @@ task.spawn(function()
             "👾 NPCs Disponibles: " .. npcCount .. "\n" ..
             "📏 Radio de Detección: " .. instantBring.config.BRING_RADIUS .. " studs\n" ..
             "📍 Distancia: " .. instantBring.config.TELEPORT_OFFSET .. " studs\n" ..
+            "📦 Tamaño Lote: " .. instantBring.config.BATCH_SIZE .. " NPCs\n" ..
+            "⏱️ Delay Lote: " .. string.format("%.3f", instantBring.config.BATCH_DELAY) .. "s\n" ..
             "❄️ Congelar: " .. tostring(instantBring.config.FREEZE_NPC) .. "\n" ..
+            "🛡️ Anti-Lag: " .. (antiLagOptimizer.isEnabled and "✅ ACTIVO" or "❌ INACTIVO") .. "\n" ..
             "🟢 Estado: " .. (isBringingActive and "🔴 ACTIVO" or "⚪ INACTIVO") .. "\n" ..
             "═══════════════════════════════════════"
         )
@@ -267,7 +415,7 @@ end)
 
 -- ════════════════════════════════════════════════════════════════
 -- PESTAÑA DE ATAJOS
--- ════════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════���═══════════════
 
 local KeyBindTab = Window:CreateTab("⌨️ ATAJOS", 0)
 
@@ -277,7 +425,7 @@ KeyBindTab:CreateKeybind({
     HoldToInteract = false,
     Flag = "InstantBringKey",
     Callback = function(Keybind)
-        local count = instantBring:BringAllNPCs()
+        local count = instantBring:BringAllNPCsOptimized()
         Rayfield:Notify({
             Title = "⚡ TRAÍDO",
             Content = count .. " NPCs traídos",
@@ -305,6 +453,30 @@ KeyBindTab:CreateKeybind({
             Rayfield:Notify({
                 Title = "⏹️ Desactivado",
                 Content = "Modo continuo apagado",
+                Duration = 1
+            })
+        end
+    end
+})
+
+KeyBindTab:CreateKeybind({
+    Name = "🛡️ Anti-Lag On/Off",
+    CurrentKeybind = "L",
+    HoldToInteract = false,
+    Flag = "AntiLagToggleKey",
+    Callback = function(Keybind)
+        if antiLagOptimizer.isEnabled then
+            antiLagOptimizer:Disable()
+            Rayfield:Notify({
+                Title = "✨ Anti-Lag Off",
+                Content = "Gráficos restaurados",
+                Duration = 1
+            })
+        else
+            antiLagOptimizer:Enable()
+            Rayfield:Notify({
+                Title = "🛡️ Anti-Lag On",
+                Content = "Optimizaciones activadas",
                 Duration = 1
             })
         end
@@ -413,6 +585,24 @@ PresetsTab:CreateButton({
     end
 })
 
+PresetsTab:CreateButton({
+    Name = "⚡ PRESET ANTI-LAG (Óptimo)",
+    Callback = function()
+        instantBring:SetConfig("BRING_RADIUS", 100)
+        instantBring:SetConfig("BATCH_SIZE", 15)
+        instantBring:SetConfig("BATCH_DELAY", 0.02)
+        radiusSlider:Set(100)
+        batchSlider:Set(15)
+        batchDelaySlider:Set(0.02)
+        antiLagOptimizer:Enable()
+        Rayfield:Notify({
+            Title = "⚡ Preset Anti-Lag",
+            Content = "Configuración óptima sin lag",
+            Duration = 2
+        })
+    end
+})
+
 -- ════════════════════════════════════════════════════════════════
 -- PESTAÑA DE INFORMACIÓN
 -- ════════════════════════════════════════════════════════════════
@@ -420,20 +610,27 @@ PresetsTab:CreateButton({
 local InfoTab = Window:CreateTab("ℹ️ INFO", 0)
 
 InfoTab:CreateLabel(
-    "⚡ INSTANT BRING SYSTEM\n\n" ..
-    "Sistema de atracción INSTANTÁNEA para Blox Fruits\n\n" ..
+    "⚡ INSTANT BRING SYSTEM (Anti-Lag)\n\n" ..
+    "Sistema de atracción INSTANTÁNEA para Blox Fruits\n" ..
+    "OPTIMIZADO PARA EVITAR LAG\n\n" ..
     "🎯 CARACTERÍSTICAS:\n" ..
     "✓ Trae NPCs INSTANTÁNEAMENTE\n" ..
-    "✓ Modo continuo para granja\n" ..
+    "✓ Procesamiento por lotes (Anti-Lag)\n" ..
+    "✓ Caché de NPCs\n" ..
+    "✓ Optimizador de gráficos\n" ..
     "✓ Radio configurable (10-500 studs)\n" ..
-    "✓ Distancia al jugador personalizable\n" ..
-    "✓ Opción de congelación\n" ..
-    "✓ Atajos de teclado rápidos\n\n" ..
+    "✓ Distancia personalizable\n" ..
+    "✓ Control de delay\n\n" ..
+    "🛡️ ANTI-LAG:\n" ..
+    "• Desactiva sombras globales\n" ..
+    "• Aumenta brillo para mejor FPS\n" ..
+    "• Desactiva partículas\n" ..
+    "• Sistema de lotes inteligente\n\n" ..
     "⌨️ CONTROLES:\n" ..
-    "R - Traer todos (Instantáneo)\n" ..
-    "T - Activar/Desactivar continuo\n" ..
-    "↑ - Aumentar radio\n" ..
-    "↓ - Disminuir radio\n\n" ..
+    "R - Traer todos\n" ..
+    "T - Modo continuo\n" ..
+    "L - Anti-Lag On/Off\n" ..
+    "↑/↓ - Ajustar radio\n\n" ..
     "⚠️ USO BAJO TU RESPONSABILIDAD"
 )
 
@@ -447,13 +644,14 @@ InfoTab:CreateButton({
             print(key .. ": " .. tostring(value))
         end
         print("═══════════════════════════════════")
+        print("Anti-Lag Status: " .. (antiLagOptimizer.isEnabled and "ACTIVO" or "INACTIVO"))
     end
 })
 
 -- Notificación inicial
 Rayfield:Notify({
     Title = "⚡ INSTANT BRING ACTIVADO",
-    Content = "Presiona R para traer todos los NPCs instantáneamente",
+    Content = "Presiona R para traer NPCs | L para Anti-Lag",
     Duration = 4,
     Image = 4483362458
 })
